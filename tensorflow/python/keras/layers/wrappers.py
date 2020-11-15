@@ -21,6 +21,7 @@ from __future__ import print_function
 
 import copy
 
+from tensorflow.python.eager import context
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.keras import backend as K
 from tensorflow.python.keras.engine.base_layer import Layer
@@ -28,11 +29,11 @@ from tensorflow.python.keras.engine.input_spec import InputSpec
 from tensorflow.python.keras.layers.recurrent import _standardize_args
 from tensorflow.python.keras.utils import generic_utils
 from tensorflow.python.keras.utils import layer_utils
+from tensorflow.python.keras.utils import tf_inspect
 from tensorflow.python.keras.utils import tf_utils
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops.ragged import ragged_tensor
 from tensorflow.python.util import nest
-from tensorflow.python.util import tf_inspect
 from tensorflow.python.util.tf_export import keras_export
 
 
@@ -92,14 +93,17 @@ class TimeDistributed(Wrapper):
   with `channels_last` data format, across 10 timesteps.
   The batch input shape is `(32, 10, 128, 128, 3)`.
 
-  You can then use `TimeDistributed` to apply a `Conv2D` layer to each of the
-  10 timesteps, independently:
+  You can then use `TimeDistributed` to apply the same `Conv2D` layer to each
+  of the 10 timesteps, independently:
 
   >>> inputs = tf.keras.Input(shape=(10, 128, 128, 3))
   >>> conv_2d_layer = tf.keras.layers.Conv2D(64, (3, 3))
   >>> outputs = tf.keras.layers.TimeDistributed(conv_2d_layer)(inputs)
   >>> outputs.shape
   TensorShape([None, 10, 126, 126, 64])
+
+  Because `TimeDistributed` applies the same instance of `Conv2D` to each of the
+  timestamps, the same set of weights are used at each timestamp.
 
   Arguments:
     layer: a `tf.keras.layers.Layer` instance.
@@ -125,7 +129,6 @@ class TimeDistributed(Wrapper):
               input=layer))
     super(TimeDistributed, self).__init__(layer, **kwargs)
     self.supports_masking = True
-    self._supports_ragged_inputs = True
 
     # It is safe to use the fast, reshape-based approach with all of our
     # built-in Layers.
@@ -242,6 +245,11 @@ class TimeDistributed(Wrapper):
         output_shape = self._get_shape_tuple((-1, input_length), y, 1,
                                              output_shape[2:])
         y = array_ops.reshape(y, output_shape)
+        if not context.executing_eagerly():
+          # Set the static shape for the result since it might be lost during
+          # array_ops reshape, eg, some `None` dim in the result could be
+          # inferred.
+          y.set_shape(self.compute_output_shape(input_shape))
 
     return y
 
@@ -342,10 +350,11 @@ class Bidirectional(Wrapper):
       combined. One of {'sum', 'mul', 'concat', 'ave', None}. If None, the
       outputs will not be combined, they will be returned as a list. Default
       value is 'concat'.
-    backward_layer: Optional `keras.layers.RNN`, or keras.layers.Layer` instance
-      to be used to handle backwards input processing. If `backward_layer` is
-      not provided, the layer instance passed as the `layer` argument will be
-      used to generate the backward layer automatically.
+    backward_layer: Optional `keras.layers.RNN`, or `keras.layers.Layer`
+      instance to be used to handle backwards input processing.
+      If `backward_layer` is not provided, the layer instance passed as the
+      `layer` argument will be used to generate the backward layer
+      automatically.
       Note that the provided `backward_layer` layer should have properties
       matching those of the `layer` argument, in particular it should have the
       same values for `stateful`, `return_states`, `return_sequence`, etc.
@@ -356,6 +365,10 @@ class Bidirectional(Wrapper):
   Call arguments:
     The call arguments for this layer are the same as those of the wrapped RNN
       layer.
+    Beware that when passing the `initial_state` argument during the call of
+    this layer, the first half in the list of elements in the `initial_state`
+    list will be passed to the forward RNN call and the last half in the list
+    of elements will be passed to the backward RNN call.
 
   Raises:
     ValueError:
@@ -449,7 +462,6 @@ class Bidirectional(Wrapper):
     self._trainable = True
     self._num_constants = 0
     self.input_spec = layer.input_spec
-    self._supports_ragged_inputs = True
 
   def _verify_layer_config(self):
     """Ensure the forward and backward layers have valid common property."""
@@ -651,7 +663,8 @@ class Bidirectional(Wrapper):
       y_rev = y_rev[0]
 
     if self.return_sequences:
-      y_rev = K.reverse(y_rev, 1)
+      time_dim = 0 if getattr(self.forward_layer, 'time_major', False) else 1
+      y_rev = K.reverse(y_rev, time_dim)
     if self.merge_mode == 'concat':
       output = K.concatenate([y, y_rev])
     elif self.merge_mode == 'sum':

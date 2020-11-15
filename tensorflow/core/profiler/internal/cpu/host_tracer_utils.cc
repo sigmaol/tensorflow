@@ -14,14 +14,19 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/core/profiler/internal/cpu/host_tracer_utils.h"
 
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "tensorflow/core/profiler/internal/parse_annotation.h"
-#include "tensorflow/core/profiler/internal/traceme_recorder.h"
+#include "absl/strings/string_view.h"
+#include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/profiler/internal/cpu/traceme_recorder.h"
 #include "tensorflow/core/profiler/protobuf/xplane.pb.h"
+#include "tensorflow/core/profiler/utils/parse_annotation.h"
+#include "tensorflow/core/profiler/utils/tf_op_utils.h"
 #include "tensorflow/core/profiler/utils/xplane_builder.h"
+#include "tensorflow/core/profiler/utils/xplane_utils.h"
 
 namespace tensorflow {
 namespace profiler {
@@ -34,14 +39,14 @@ void MakeCompleteEvents(TraceMeRecorder::Events* events) {
   // before the record created by ActivityEnd. Cross-thread events must be
   // processed in a separate pass. A single map can be used because the
   // activity_id is globally unique.
-  absl::flat_hash_map<uint64, TraceMeRecorder::Event*> start_events;
+  absl::flat_hash_map<int64, TraceMeRecorder::Event*> start_events;
   std::vector<TraceMeRecorder::Event*> end_events;
   for (auto& thread : *events) {
     for (auto& event : thread.events) {
-      if (IsStartEvent(event)) {
-        start_events.emplace(event.activity_id, &event);
-      } else if (IsEndEvent(event)) {
-        auto iter = start_events.find(event.activity_id);
+      if (event.IsStart()) {
+        start_events.emplace(event.ActivityId(), &event);
+      } else if (event.IsEnd()) {
+        auto iter = start_events.find(event.ActivityId());
         if (iter != start_events.end()) {  // same thread
           auto* start_event = iter->second;
           event.name = std::move(start_event->name);
@@ -54,7 +59,7 @@ void MakeCompleteEvents(TraceMeRecorder::Events* events) {
     }
   }
   for (auto* event : end_events) {  // cross-thread
-    auto iter = start_events.find(event->activity_id);
+    auto iter = start_events.find(event->ActivityId());
     if (iter != start_events.end()) {
       auto* start_event = iter->second;
       event->name = std::move(start_event->name);
@@ -74,10 +79,15 @@ void ConvertCompleteEventsToXPlane(uint64 start_timestamp_ns,
     xline.SetTimestampNs(start_timestamp_ns);
     xline.ReserveEvents(thread.events.size());
     for (const auto& event : thread.events) {
-      if (!IsCompleteEvent(event)) continue;
+      if (!event.IsComplete()) continue;
+      if (event.start_time < start_timestamp_ns) continue;
       Annotation annotation = ParseAnnotation(event.name);
       XEventMetadata* xevent_metadata =
           xplane.GetOrCreateEventMetadata(annotation.name);
+      std::string tf_op_event_name = TfOpEventName(annotation.name);
+      if (tf_op_event_name != annotation.name) {
+        xevent_metadata->set_display_name(std::move(tf_op_event_name));
+      }
       XEventBuilder xevent = xline.AddEvent(*xevent_metadata);
       xevent.SetTimestampNs(event.start_time);
       xevent.SetEndTimestampNs(event.end_time);
@@ -89,6 +99,7 @@ void ConvertCompleteEventsToXPlane(uint64 start_timestamp_ns,
       }
     }
   }
+  SortXLinesBy(raw_plane, XLinesComparatorByName());
 }
 
 }  // namespace profiler

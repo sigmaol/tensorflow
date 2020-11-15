@@ -31,7 +31,7 @@ namespace gpu {
 namespace cl {
 namespace {
 
-TEST_F(OpenCLOperationTest, DepthWiseConvSimpleWeights) {
+TEST_F(OpenCLOperationTest, DepthwiseConvSimpleWeights) {
   TensorFloat32 src_tensor;
   src_tensor.shape = BHWC(1, 2, 2, 2);
   src_tensor.data = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f};
@@ -55,11 +55,12 @@ TEST_F(OpenCLOperationTest, DepthWiseConvSimpleWeights) {
       op_def.src_tensors.push_back({data_type, storage, Layout::HWC});
       op_def.dst_tensors.push_back({data_type, storage, Layout::HWC});
       TensorFloat32 dst_tensor;
-      DepthWiseConvolution operation;
-      ASSERT_OK(CreateDepthWiseConvolution(creation_context_, op_def, attr,
-                                           &operation));
-      ASSERT_OK(ExecuteGPUOperation(src_tensor, creation_context_, &operation,
-                                    BHWC(1, 2, 2, 2), &dst_tensor));
+      GPUOperation operation = CreateDepthwiseConvolution2D(
+          creation_context_.GetGpuInfo(), op_def, attr);
+      ASSERT_OK(ExecuteGPUOperation(
+          src_tensor, creation_context_,
+          absl::make_unique<GPUOperation>(std::move(operation)),
+          BHWC(1, 2, 2, 2), &dst_tensor));
       EXPECT_THAT(dst_tensor.data,
                   Pointwise(FloatNear(eps), {4.0f, 6.0f, 8.0f, 10.0f, 4.0f,
                                              6.0f, 8.0f, 10.0f}));
@@ -67,7 +68,7 @@ TEST_F(OpenCLOperationTest, DepthWiseConvSimpleWeights) {
   }
 }
 
-TEST_F(OpenCLOperationTest, DepthWiseConvNoMultiplier) {
+TEST_F(OpenCLOperationTest, DepthwiseConvNoMultiplier) {
   TensorFloat32 src_tensor;
   src_tensor.shape = BHWC(1, 2, 2, 2);
   src_tensor.data = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f};
@@ -91,11 +92,12 @@ TEST_F(OpenCLOperationTest, DepthWiseConvNoMultiplier) {
       op_def.src_tensors.push_back({data_type, storage, Layout::HWC});
       op_def.dst_tensors.push_back({data_type, storage, Layout::HWC});
       TensorFloat32 dst_tensor;
-      DepthWiseConvolution operation;
-      ASSERT_OK(CreateDepthWiseConvolution(creation_context_, op_def, attr,
-                                           &operation));
-      ASSERT_OK(ExecuteGPUOperation(src_tensor, creation_context_, &operation,
-                                    BHWC(1, 2, 2, 2), &dst_tensor));
+      GPUOperation operation = CreateDepthwiseConvolution2D(
+          creation_context_.GetGpuInfo(), op_def, attr);
+      ASSERT_OK(ExecuteGPUOperation(
+          src_tensor, creation_context_,
+          absl::make_unique<GPUOperation>(std::move(operation)),
+          BHWC(1, 2, 2, 2), &dst_tensor));
       EXPECT_THAT(dst_tensor.data,
                   Pointwise(FloatNear(eps), {16.5f, 27.5f, 28.5f, 43.5f, 8.5f,
                                              15.5f, 12.5f, 23.5f}));
@@ -103,7 +105,7 @@ TEST_F(OpenCLOperationTest, DepthWiseConvNoMultiplier) {
   }
 }
 
-TEST_F(OpenCLOperationTest, DepthWiseConvMultiplier2) {
+TEST_F(OpenCLOperationTest, DepthwiseConvMultiplier2) {
   TensorFloat32 src_tensor;
   src_tensor.shape = BHWC(1, 2, 2, 2);
   src_tensor.data = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f};
@@ -128,11 +130,12 @@ TEST_F(OpenCLOperationTest, DepthWiseConvMultiplier2) {
       op_def.src_tensors.push_back({data_type, storage, Layout::HWC});
       op_def.dst_tensors.push_back({data_type, storage, Layout::HWC});
       TensorFloat32 dst_tensor;
-      DepthWiseConvolution operation;
-      ASSERT_OK(CreateDepthWiseConvolution(creation_context_, op_def, attr,
-                                           &operation));
-      ASSERT_OK(ExecuteGPUOperation(src_tensor, creation_context_, &operation,
-                                    BHWC(1, 2, 2, 4), &dst_tensor));
+      GPUOperation operation = CreateDepthwiseConvolution2D(
+          creation_context_.GetGpuInfo(), op_def, attr);
+      ASSERT_OK(ExecuteGPUOperation(
+          src_tensor, creation_context_,
+          absl::make_unique<GPUOperation>(std::move(operation)),
+          BHWC(1, 2, 2, 4), &dst_tensor));
       EXPECT_THAT(
           dst_tensor.data,
           Pointwise(FloatNear(eps),
